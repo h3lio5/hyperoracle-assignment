@@ -1,7 +1,7 @@
 use halo2_proofs::{circuit::*, plonk::*, poly::Rotation};
 
 use eth_types::Field;
-use gadgets::less_than::{LtChip, LtConfig};
+use gadgets::less_than::{LtChip, LtConfig, LtInstruction};
 use std::marker::PhantomData;
 
 #[derive(Clone, Debug)]
@@ -38,7 +38,10 @@ impl<F: Field, const ARR_LEN: usize> BubbleSortChip<F, ARR_LEN> {
 
         let instance = meta.instance_column();
 
-        let _ = (0..ARR_LEN).map(|i| meta.enable_equality(array_columns[i]));
+        // let _ = (0..ARR_LEN).map(|i| meta.enable_equality(array_columns[i]));
+        for i in 0..ARR_LEN {
+            meta.enable_equality(array_columns[i]);
+        }
 
         meta.enable_equality(value_l);
         meta.enable_equality(value_r);
@@ -72,6 +75,7 @@ impl<F: Field, const ARR_LEN: usize> BubbleSortChip<F, ARR_LEN> {
     pub fn assign_first_row(
         &self,
         layouter: &mut impl Layouter<F>,
+        lt_chip: LtChip<F, 4>,
         input_array: Vec<F>,
     ) -> Result<Vec<ACell<F>>, Error> {
         layouter.assign_region(
@@ -106,6 +110,15 @@ impl<F: Field, const ARR_LEN: usize> BubbleSortChip<F, ARR_LEN> {
                     || Value::known(F::from(369u64)),
                 )?;
 
+                lt_chip
+                    .assign(
+                        &mut region,
+                        0,
+                        Value::known(F::from(369u64)),
+                        Value::known(F::from(369u64)),
+                    )
+                    .expect("assign first row lt_chip failed");
+
                 // return the assigned cells which will be used to create equality constraint with the subsequent row assignment.
                 Ok(prev_arr)
             },
@@ -115,6 +128,7 @@ impl<F: Field, const ARR_LEN: usize> BubbleSortChip<F, ARR_LEN> {
     pub fn assign_row(
         &self,
         layouter: &mut impl Layouter<F>,
+        lt_chip: LtChip<F, 4>,
         intermediate_array: Vec<ACell<F>>,
         swap_index: usize,
     ) -> Result<Vec<ACell<F>>, Error> {
@@ -123,7 +137,10 @@ impl<F: Field, const ARR_LEN: usize> BubbleSortChip<F, ARR_LEN> {
             |mut region| {
                 let mut prev_arr = Vec::new();
 
-                self.config.swap_selector.enable(&mut region, 0)?;
+                self.config
+                    .swap_selector
+                    .enable(&mut region, 0)
+                    .expect("swap_selector enable failed @ assign_row");
 
                 let n = intermediate_array.len();
                 let mut i: usize = 0;
@@ -173,19 +190,24 @@ impl<F: Field, const ARR_LEN: usize> BubbleSortChip<F, ARR_LEN> {
                 }
 
                 // copy the swapped pair to value_l and value_r
-                prev_arr[swap_index].0.copy_advice(
-                    || "value_l assignment",
-                    &mut region,
-                    self.config.value_l,
-                    0,
-                )?;
+                prev_arr[swap_index]
+                    .0
+                    .copy_advice(|| "value_l assignment", &mut region, self.config.value_l, 0)
+                    .expect("copy value_l @ assign_row failed");
 
-                prev_arr[swap_index + 1].0.copy_advice(
-                    || "value_r assignment",
-                    &mut region,
-                    self.config.value_r,
-                    0,
-                )?;
+                prev_arr[swap_index + 1]
+                    .0
+                    .copy_advice(|| "value_r assignment", &mut region, self.config.value_r, 0)
+                    .expect("copy value_r @ assign_row failed");
+
+                lt_chip
+                    .assign(
+                        &mut region,
+                        0,
+                        prev_arr[swap_index].0.value().copied(),
+                        prev_arr[swap_index + 1].0.value().copied(),
+                    )
+                    .expect("lt_chip assign @ assign_row failed");
 
                 Ok(prev_arr)
             },
@@ -220,7 +242,10 @@ impl<F: Field, const ARR_LEN: usize> Circuit<F> for BubbleSortCicuit<F, ARR_LEN>
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), halo2_proofs::plonk::Error> {
-        let chip = BubbleSortChip::<F, ARR_LEN>::construct(config);
+        let chip = BubbleSortChip::<F, ARR_LEN>::construct(config.clone());
+        let lt_chip = LtChip::construct(config.lt);
+
+        lt_chip.load(&mut layouter)?;
 
         let compute_bubblesort_swap_indices = |array: &Vec<F>| {
             let mut swap_indices = Vec::new();
@@ -236,14 +261,18 @@ impl<F: Field, const ARR_LEN: usize> Circuit<F> for BubbleSortCicuit<F, ARR_LEN>
 
         let swap_indices = compute_bubblesort_swap_indices(&self.input_array);
 
-        let mut prev_arr = chip.assign_first_row(&mut layouter, self.input_array.clone())?;
+        let mut prev_arr = chip
+            .assign_first_row(&mut layouter, lt_chip.clone(), self.input_array.clone())
+            .expect("assign row first failed");
 
         let _ = (0..ARR_LEN).map(|idx| {
             chip.expose_public(layouter.namespace(|| "input array"), &prev_arr[idx], idx)
         });
 
         for swap_idx in swap_indices {
-            prev_arr = chip.assign_row(&mut layouter, prev_arr, swap_idx)?;
+            prev_arr = chip
+                .assign_row(&mut layouter, lt_chip.clone(), prev_arr, swap_idx)
+                .expect("assign row failed");
         }
 
         let _ = (0..ARR_LEN).map(|idx| {
