@@ -247,19 +247,20 @@ impl<F: Field, const ARR_LEN: usize> Circuit<F> for BubbleSortCicuit<F, ARR_LEN>
 
         lt_chip.load(&mut layouter)?;
 
-        let compute_bubblesort_swap_indices = |array: &Vec<F>| {
+        let compute_bubblesort_swap_indices = |mut array: Vec<F>| {
             let mut swap_indices = Vec::new();
             for i in 0..array.len() {
                 for j in 0..array.len() - i - 1 {
                     if array[j + 1] < array[j] {
                         swap_indices.push(j);
+                        array.swap(j, j + 1);
                     }
                 }
             }
             swap_indices
         };
 
-        let swap_indices = compute_bubblesort_swap_indices(&self.input_array);
+        let swap_indices = compute_bubblesort_swap_indices(self.input_array.clone());
 
         let mut prev_arr = chip
             .assign_first_row(&mut layouter, lt_chip.clone(), self.input_array.clone())
@@ -310,7 +311,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let public_input = [&input[..], &output[..]].concat();
-        let mut circuit = BubbleSortCicuit::<Fp, 4> {
+        let circuit = BubbleSortCicuit::<Fp, 4> {
             input_array: input.clone(),
             _marker: PhantomData::<Fp>,
         };
@@ -318,5 +319,33 @@ mod tests {
         let prover = MockProver::run(k, &circuit, vec![public_input]).unwrap();
 
         prover.assert_satisfied();
+    }
+
+    #[cfg(feature = "dev-graph")]
+    #[test]
+    fn print_bubblesort_vanilla() {
+        use plotters::prelude::*;
+
+        let root =
+            BitMapBackend::new("bubblesort-vanilla-layout.png", (1024, 3096)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root
+            .titled("Bubblesort Vanilla Layout", ("sans-serif", 60))
+            .unwrap();
+
+        // input array
+        let input = vec![3, 5, 1, 2]
+            .into_iter()
+            .map(|value| Fp::from(value))
+            .collect::<Vec<_>>();
+
+        let mut circuit = BubbleSortCicuit::<Fp, 4> {
+            input_array: input.clone(),
+            _marker: PhantomData::<Fp>,
+        };
+
+        halo2_proofs::dev::CircuitLayout::default()
+            .render(9, &circuit, &root)
+            .unwrap();
     }
 }
