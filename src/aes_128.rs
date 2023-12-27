@@ -1,14 +1,11 @@
-use gadgets::util::xor;
-use halo2_proofs::{
-    arithmetic::Field, circuit::*, halo2curves::ff::PrimeField, plonk::*, poly::Rotation,
-};
+use halo2_proofs::{circuit::*, halo2curves::ff::PrimeField, plonk::*, poly::Rotation};
 
-use std::{alloc::LayoutErr, marker::PhantomData};
+use std::marker::PhantomData;
 
 #[derive(Clone, Debug)]
-struct ACell<F: PrimeField>(AssignedCell<F, F>);
+pub struct ACell<F: PrimeField>(AssignedCell<F, F>);
 
-static sbox_matrix: [u8; 256] = [
+static SBOX_MATRIX: [u8; 256] = [
     0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
     0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
     0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15,
@@ -28,7 +25,7 @@ static sbox_matrix: [u8; 256] = [
 ];
 
 #[derive(Debug, Clone)]
-struct AESByteMagicTablesConfig<F: PrimeField> {
+pub struct AESByteMagicTablesConfig<F: PrimeField> {
     range_check_table: TableColumn,
     xor_table: TableColumn,
     xtime_table: TableColumn,
@@ -108,14 +105,10 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 let f_xtime = || {
                     let mut xtime_magic_values = vec![];
                     for a in 0..=255u8 {
-                        let xtime = if (a & 0x80) == 0x80 {
-                            (a << 1 ^ 0x1B) & 0xFF
-                        } else {
-                            a << 1
-                        };
+                        let xtime_value = f_xtime(a);
 
                         let xtime_magic =
-                            2_usize.pow(25) + 2_usize.pow(8) * a as usize + xtime as usize;
+                            2_usize.pow(25) + 2_usize.pow(8) * a as usize + xtime_value as usize;
 
                         xtime_magic_values.push(xtime_magic);
                     }
@@ -143,7 +136,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 let f_sbox = || {
                     let mut sbox_magic_values = vec![];
                     for a in 0..256 {
-                        let b = sbox_matrix[a];
+                        let b = SBOX_MATRIX[a];
                         let sbox = (a + 1) * 256 + b as usize;
                         sbox_magic_values.push(sbox);
                     }
@@ -169,7 +162,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
 }
 
 #[derive(Debug, Clone)]
-struct AES128Config<F: PrimeField> {
+pub struct AES128Config<F: PrimeField> {
     q_range_check: Selector,
     q_xor: Selector,
     q_sbox: Selector,
@@ -199,6 +192,14 @@ impl<F: PrimeField> AES128Config<F> {
 
         let byte_magic_table = AESByteMagicTablesConfig::configure(meta);
 
+        let AESByteMagicTablesConfig {
+            range_check_table,
+            xor_table,
+            xtime_table,
+            sbox_table,
+            _marker,
+        } = byte_magic_table;
+
         let config = Self {
             q_range_check,
             q_xor,
@@ -212,25 +213,124 @@ impl<F: PrimeField> AES128Config<F> {
         };
 
         meta.lookup("aes byte magic tables lookup", |meta| {
-            let qrc = meta.query_selector(q_range_check);
-            let qxor = meta.query_selector(q_xor);
-            let qxtime = meta.query_selector(q_xtime);
-            let qsbox = meta.query_selector(q_sbox);
-
             let mut gates = vec![];
-            // perform gate check separately for each of the 16 bytes
-            // for i in 0..16 {
-            //     let current_val = meta.query_advice(aes_state[i], Rotation::cur());
-            //     // range check
-            //     gates.push((
-            //         qrc.clone() * current_val,
-            //         byte_magic_table.range_check_table,
-            //     ));
 
-            //     // xor
-            //     let previous_val = meta.query_advice(aes_state[i], Rotation::prev());
-            //     let xor_magic_value = Expression::Constant(F::from_u128(2_u128.pow(24))) + Expression::Constant(F::from_u128(2_u128.pow(16))) * previous_val + Expression::Constant(F::from_u128(2_u128.pow(8))) +
-            // }
+            // There are 7 types of constraints in total.
+            //  - range check for just the first 2 rows -- input, key. (q_range_check)
+            //  - xor check (q_xor)
+            //  - sub_bytes check (q_sbox)
+            //  - xor adjacent column elements check (q_xor_col_adj)
+            //  - xor total check (q_xor_total)
+            //  - xor(col, total) check (q_xor_col_total)
+            //  - xtime check (q_xtime)
+
+            // Starting with the range check
+            let q_rc = meta.query_selector(q_range_check);
+            for i in 0..16 {
+                let gate = q_rc.clone() * meta.query_advice(aes_state[i], Rotation::cur());
+                gates.push((gate, range_check_table));
+            }
+
+            // Xor check
+            let qxor = meta.query_selector(q_xor);
+            for i in 0..16 {
+                let a = meta.query_advice(aes_state[i], Rotation(-2));
+                let b = meta.query_advice(aes_state[i], Rotation::prev());
+                let a_xor_b = meta.query_advice(aes_state[i], Rotation::cur());
+
+                // we need to lookup the xor magic value in the lookup table
+                // 2.pow(24) + 2.pow(16) * a + 2.pow(8) * b + a ^ b
+                let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+                    + Expression::Constant(F::from_u128(65536)) * a
+                    + Expression::Constant(F::from_u128(256)) * b
+                    + a_xor_b;
+                let gate = qxor.clone() * xor_magic_value;
+                gates.push((gate, xor_table));
+            }
+
+            // substitution bytes check
+            let qsbox = meta.query_selector(q_sbox);
+            for i in 0..16 {
+                let old_value = meta.query_advice(aes_state[i], Rotation::prev());
+                let sub_value = meta.query_advice(aes_state[i], Rotation::cur());
+
+                // we need to lookup the sbox magic value in the lookup table
+                // (a + 1) * 256 + b
+                let sbox_magic_value = (old_value + Expression::Constant(F::from_u128(1)))
+                    * Expression::Constant(F::from_u128(256))
+                    + sub_value;
+                let gate = qsbox.clone() * sbox_magic_value;
+                gates.push((gate, sbox_table));
+            }
+
+            // xor of adjacent column elements check
+            let qxor_col_adj = meta.query_selector(q_xor_col_adj);
+            for i in 0..16 {
+                let col = meta.query_advice(aes_state[i], Rotation::prev());
+                let col_adj = meta.query_advice(aes_state[(i + 4) % 16], Rotation::prev());
+                let xor_value = meta.query_advice(aes_state[i], Rotation::cur());
+
+                // we need to do the xor magic again
+                // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * col_adj + xor_value
+                let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+                    + Expression::Constant(F::from_u128(65536)) * col
+                    + Expression::Constant(F::from_u128(256)) * col_adj
+                    + xor_value;
+                let gate = qxor_col_adj.clone() * xor_magic_value;
+                gates.push((gate, xor_table));
+            }
+
+            // xor total (xor'ing all the elements of a column) check
+            let qxor_total = meta.query_selector(q_xor_total);
+            for i in 0..4 {
+                let col01 = meta.query_advice(aes_state[i], Rotation::prev());
+                let col23 = meta.query_advice(aes_state[i + 8], Rotation::prev());
+
+                for j in 0..4 {
+                    let xor_total = meta.query_advice(aes_state[i + 4 * j], Rotation::cur());
+                    // we need to do the xor magic again
+                    // i.e., 2.pow(24) + 2.pow(16) * col01 + 2.pow(8) * col23 + xor_total
+                    let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+                        + Expression::Constant(F::from_u128(65536)) * col01.clone()
+                        + Expression::Constant(F::from_u128(256)) * col23.clone()
+                        + xor_total;
+                    let gate = qxor_total.clone() * xor_magic_value;
+                    gates.push((gate, xor_table));
+                }
+            }
+
+            // xor(col, total) check
+            let qxor_col_total = meta.query_selector(q_xor_col_total);
+            for i in 0..16 {
+                let col = meta.query_advice(aes_state[i], Rotation(-3));
+                let total = meta.query_advice(aes_state[i], Rotation::prev());
+
+                let col_xor_total = meta.query_advice(aes_state[i], Rotation::cur());
+
+                // we need to do the xor magic again
+                // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * total + col_xor_total
+                let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+                    + Expression::Constant(F::from_u128(65536)) * col
+                    + Expression::Constant(F::from_u128(256)) * total
+                    + col_xor_total;
+                let gate = qxor_col_total.clone() * xor_magic_value;
+                gates.push((gate, xor_table));
+            }
+
+            // xtime operation check
+            let qxtime = meta.query_selector(q_xtime);
+            for i in 0..16 {
+                let col_adj = meta.query_advice(aes_state[i], Rotation(-3));
+                let xtime_value = meta.query_advice(aes_state[i], Rotation::cur());
+
+                // we need to compute the xtime magic value and check if it is present in the lookup table
+                // 2.pow(25) + 2.pow(8) * x + xtime
+                let xtime_magic_value = Expression::Constant(F::from_u128(33554432))
+                    + Expression::Constant(F::from_u128(256)) * col_adj
+                    + xtime_value;
+                let gate = qxtime.clone() * xtime_magic_value;
+                gates.push((gate, xtime_table));
+            }
             gates
         });
 
@@ -328,7 +428,7 @@ impl<F: PrimeField> AES128Config<F> {
                 let mut prev_arr = vec![];
                 let mut prev_arr_acell = vec![];
                 for (col_idx, &value_byte) in byte_arr.iter().enumerate() {
-                    let sub_byte_value = sbox_matrix[value_byte as usize];
+                    let sub_byte_value = SBOX_MATRIX[value_byte as usize];
                     let acell = region
                         .assign_advice(
                             || "assigning sub_bytes row",
@@ -526,13 +626,13 @@ impl<F: PrimeField> AES128Config<F> {
 }
 
 #[derive(Default)]
-struct AESCircuit<F: PrimeField> {
-    input: [u8; 16],
-    key: [u8; 16],
+pub struct AES128Circuit<F: PrimeField> {
+    pub input: [u8; 16],
+    pub key: [u8; 16],
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> Circuit<F> for AESCircuit<F> {
+impl<F: PrimeField> Circuit<F> for AES128Circuit<F> {
     type Config = AES128Config<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -551,6 +651,12 @@ impl<F: PrimeField> Circuit<F> for AESCircuit<F> {
     ) -> Result<(), Error> {
         let input = self.input.to_vec();
         let key = self.key.to_vec();
+
+        // load the lookup table
+        config
+            .byte_magic_table
+            .load(&mut layouter)
+            .expect("byte_magic_table loading error");
 
         let mut prev_arr: Vec<u8>;
         let mut prev_arr_acell: Vec<ACell<F>>;
@@ -626,6 +732,38 @@ impl<F: PrimeField> Circuit<F> for AESCircuit<F> {
             .expect("failure @ final round add_round_key assign_xor");
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::AES128Circuit;
+    use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr as Fp};
+    use std::marker::PhantomData;
+
+    #[test]
+    fn test_aes128_valid() {
+        let k = 12;
+
+        // input array
+        let input = [
+            1, 32, 45, 69, 240, 12, 66, 73, 27, 50, 61, 49, 62, 56, 62, 81,
+        ];
+
+        let key = [
+            123, 45, 67, 83, 89, 93, 28, 75, 91, 73, 85, 29, 99, 76, 39, 12,
+        ];
+
+        let circuit = AES128Circuit::<Fp> {
+            input,
+            key,
+            _marker: PhantomData::<Fp>,
+        };
+
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+
+        prover.assert_satisfied();
     }
 }
 
