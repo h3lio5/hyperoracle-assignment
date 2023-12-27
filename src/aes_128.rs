@@ -65,7 +65,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                         )
                         .expect("loading range check table failed");
                 }
-                dbg!("lookup table: range_check");
+                // dbg!("lookup table: range_check");
                 ////////// XOR Table /////////////
                 // uses a trick to check that the (a xor b) is valid.
                 // Trick: for all pairs of a byte value, i.e., (a,b) where both a and b lie in [0, 256)
@@ -86,7 +86,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 };
 
                 let xor_magic_values = f_xor();
-                dbg!("lookup table: xor", xor_magic_values.len());
+                // dbg!("lookup table: xor", xor_magic_values.len());
                 for (offset, value) in xor_magic_values.into_iter().enumerate() {
                     table
                         .assign_cell(
@@ -117,7 +117,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 };
 
                 let xtime_magic_values = f_xtime_values();
-                dbg!("lookup table: xtime", xtime_magic_values.len());
+                // dbg!("lookup table: xtime", xtime_magic_values.len());
                 for (offset, value) in xtime_magic_values.into_iter().enumerate() {
                     table
                         .assign_cell(
@@ -146,7 +146,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 };
 
                 let sbox_magic_values = f_sbox();
-                dbg!("lookup table: sbox", sbox_magic_values.len());
+                // dbg!("lookup table: sbox", sbox_magic_values.len());
                 for (offset, value) in sbox_magic_values.into_iter().enumerate() {
                     table
                         .assign_cell(
@@ -192,6 +192,10 @@ impl<F: PrimeField> AES128Config<F> {
         let q_xtime = meta.complex_selector();
 
         let aes_state = (0..16).map(|_| meta.advice_column()).collect::<Vec<_>>();
+
+        for i in 0..16 {
+            meta.enable_equality(aes_state[i]);
+        }
 
         let byte_magic_table = AESByteMagicTablesConfig::configure(meta);
 
@@ -267,73 +271,73 @@ impl<F: PrimeField> AES128Config<F> {
             }
 
             // xor of adjacent column elements check
-            let qxor_col_adj = meta.query_selector(q_xor_col_adj);
-            for i in 0..16 {
-                let col = meta.query_advice(aes_state[i], Rotation::prev());
-                let col_adj = meta.query_advice(aes_state[(i + 4) % 16], Rotation::prev());
-                let xor_value = meta.query_advice(aes_state[i], Rotation::cur());
+            // let qxor_col_adj = meta.query_selector(q_xor_col_adj);
+            // for i in 0..16 {
+            //     let col = meta.query_advice(aes_state[i], Rotation::prev());
+            //     let col_adj = meta.query_advice(aes_state[(i + 4) % 16], Rotation::prev());
+            //     let xor_value = meta.query_advice(aes_state[i], Rotation::cur());
 
-                // we need to do the xor magic again
-                // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * col_adj + xor_value
-                let xor_magic_value = Expression::Constant(F::from_u128(16777216))
-                    + Expression::Constant(F::from_u128(65536)) * col
-                    + Expression::Constant(F::from_u128(256)) * col_adj
-                    + xor_value;
-                let gate = qxor_col_adj.clone() * xor_magic_value;
-                gates.push((gate, xor_table));
-            }
+            //     // we need to do the xor magic again
+            //     // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * col_adj + xor_value
+            //     let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+            //         + Expression::Constant(F::from_u128(65536)) * col
+            //         + Expression::Constant(F::from_u128(256)) * col_adj
+            //         + xor_value;
+            //     let gate = qxor_col_adj.clone() * xor_magic_value;
+            //     gates.push((gate, xor_table));
+            // }
 
             // xor total (xor'ing all the elements of a column) check
-            let qxor_total = meta.query_selector(q_xor_total);
-            for i in 0..4 {
-                let col01 = meta.query_advice(aes_state[i], Rotation::prev());
-                let col23 = meta.query_advice(aes_state[i + 8], Rotation::prev());
+            // let qxor_total = meta.query_selector(q_xor_total);
+            // for i in 0..4 {
+            //     let col01 = meta.query_advice(aes_state[i], Rotation::prev());
+            //     let col23 = meta.query_advice(aes_state[i + 8], Rotation::prev());
 
-                for j in 0..4 {
-                    let xor_total = meta.query_advice(aes_state[i + 4 * j], Rotation::cur());
-                    // we need to do the xor magic again
-                    // i.e., 2.pow(24) + 2.pow(16) * col01 + 2.pow(8) * col23 + xor_total
-                    let xor_magic_value = Expression::Constant(F::from_u128(16777216))
-                        + Expression::Constant(F::from_u128(65536)) * col01.clone()
-                        + Expression::Constant(F::from_u128(256)) * col23.clone()
-                        + xor_total;
-                    let gate = qxor_total.clone() * xor_magic_value;
-                    gates.push((gate, xor_table));
-                }
-            }
+            //     for j in 0..4 {
+            //         let xor_total = meta.query_advice(aes_state[i + 4 * j], Rotation::cur());
+            //         // we need to do the xor magic again
+            //         // i.e., 2.pow(24) + 2.pow(16) * col01 + 2.pow(8) * col23 + xor_total
+            //         let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+            //             + Expression::Constant(F::from_u128(65536)) * col01.clone()
+            //             + Expression::Constant(F::from_u128(256)) * col23.clone()
+            //             + xor_total;
+            //         let gate = qxor_total.clone() * xor_magic_value;
+            //         gates.push((gate, xor_table));
+            //     }
+            // }
 
             // xor(col, total) check
-            let qxor_col_total = meta.query_selector(q_xor_col_total);
-            for i in 0..16 {
-                let col = meta.query_advice(aes_state[i], Rotation(-3));
-                let total = meta.query_advice(aes_state[i], Rotation::prev());
+            // let qxor_col_total = meta.query_selector(q_xor_col_total);
+            // for i in 0..16 {
+            //     let col = meta.query_advice(aes_state[i], Rotation(-3));
+            //     let total = meta.query_advice(aes_state[i], Rotation::prev());
 
-                let col_xor_total = meta.query_advice(aes_state[i], Rotation::cur());
+            //     let col_xor_total = meta.query_advice(aes_state[i], Rotation::cur());
 
-                // we need to do the xor magic again
-                // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * total + col_xor_total
-                let xor_magic_value = Expression::Constant(F::from_u128(16777216))
-                    + Expression::Constant(F::from_u128(65536)) * col
-                    + Expression::Constant(F::from_u128(256)) * total
-                    + col_xor_total;
-                let gate = qxor_col_total.clone() * xor_magic_value;
-                gates.push((gate, xor_table));
-            }
+            //     // we need to do the xor magic again
+            //     // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * total + col_xor_total
+            //     let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+            //         + Expression::Constant(F::from_u128(65536)) * col
+            //         + Expression::Constant(F::from_u128(256)) * total
+            //         + col_xor_total;
+            //     let gate = qxor_col_total.clone() * xor_magic_value;
+            //     gates.push((gate, xor_table));
+            // }
 
             // xtime operation check
             let qxtime = meta.query_selector(q_xtime);
-            for i in 0..16 {
-                let col_adj = meta.query_advice(aes_state[i], Rotation(-3));
-                let xtime_value = meta.query_advice(aes_state[i], Rotation::cur());
+            // for i in 0..16 {
+            //     let col_adj = meta.query_advice(aes_state[i], Rotation(-3));
+            //     let xtime_value = meta.query_advice(aes_state[i], Rotation::cur());
 
-                // we need to compute the xtime magic value and check if it is present in the lookup table
-                // 2.pow(25) + 2.pow(8) * x + xtime
-                let xtime_magic_value = Expression::Constant(F::from_u128(33554432))
-                    + Expression::Constant(F::from_u128(256)) * col_adj
-                    + xtime_value;
-                let gate = qxtime.clone() * xtime_magic_value;
-                gates.push((gate, xtime_table));
-            }
+            //     // we need to compute the xtime magic value and check if it is present in the lookup table
+            //     // 2.pow(25) + 2.pow(8) * x + xtime
+            //     let xtime_magic_value = Expression::Constant(F::from_u128(33554432))
+            //         + Expression::Constant(F::from_u128(256)) * col_adj
+            //         + xtime_value;
+            //     let gate = qxtime.clone() * xtime_magic_value;
+            //     gates.push((gate, xtime_table));
+            // }
             gates
         });
 
@@ -656,10 +660,12 @@ impl<F: PrimeField> Circuit<F> for AES128Circuit<F> {
         let key = self.key.to_vec();
 
         // load the lookup table
-        config
-            .byte_magic_table
-            .load(&mut layouter)
-            .expect("byte_magic_table loading error");
+        let result = config.byte_magic_table.load(&mut layouter);
+        // .expect("byte_magic_table loading error");
+        match result {
+            Ok(_) => println!("lookup table loaded!"),
+            Err(error) => println!("the loading error is {:?}", error),
+        }
 
         let mut prev_arr: Vec<u8>;
         let mut prev_arr_acell: Vec<ACell<F>>;
