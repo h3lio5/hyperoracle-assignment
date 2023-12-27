@@ -271,73 +271,73 @@ impl<F: PrimeField> AES128Config<F> {
             }
 
             // xor of adjacent column elements check
-            // let qxor_col_adj = meta.query_selector(q_xor_col_adj);
-            // for i in 0..16 {
-            //     let col = meta.query_advice(aes_state[i], Rotation::prev());
-            //     let col_adj = meta.query_advice(aes_state[(i + 4) % 16], Rotation::prev());
-            //     let xor_value = meta.query_advice(aes_state[i], Rotation::cur());
+            let qxor_col_adj = meta.query_selector(q_xor_col_adj);
+            for i in 0..16 {
+                let col = meta.query_advice(aes_state[i], Rotation::prev());
+                let col_adj = meta.query_advice(aes_state[(i + 4) % 16], Rotation::prev());
+                let xor_value = meta.query_advice(aes_state[i], Rotation::cur());
 
-            //     // we need to do the xor magic again
-            //     // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * col_adj + xor_value
-            //     let xor_magic_value = Expression::Constant(F::from_u128(16777216))
-            //         + Expression::Constant(F::from_u128(65536)) * col
-            //         + Expression::Constant(F::from_u128(256)) * col_adj
-            //         + xor_value;
-            //     let gate = qxor_col_adj.clone() * xor_magic_value;
-            //     gates.push((gate, xor_table));
-            // }
+                // we need to do the xor magic again
+                // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * col_adj + xor_value
+                let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+                    + Expression::Constant(F::from_u128(65536)) * col
+                    + Expression::Constant(F::from_u128(256)) * col_adj
+                    + xor_value;
+                let gate = qxor_col_adj.clone() * xor_magic_value;
+                gates.push((gate, xor_table));
+            }
 
             // xor total (xor'ing all the elements of a column) check
-            // let qxor_total = meta.query_selector(q_xor_total);
-            // for i in 0..4 {
-            //     let col01 = meta.query_advice(aes_state[i], Rotation::prev());
-            //     let col23 = meta.query_advice(aes_state[i + 8], Rotation::prev());
+            let qxor_total = meta.query_selector(q_xor_total);
+            for i in 0..4 {
+                let col01 = meta.query_advice(aes_state[i], Rotation::prev());
+                let col23 = meta.query_advice(aes_state[i + 8], Rotation::prev());
 
-            //     for j in 0..4 {
-            //         let xor_total = meta.query_advice(aes_state[i + 4 * j], Rotation::cur());
-            //         // we need to do the xor magic again
-            //         // i.e., 2.pow(24) + 2.pow(16) * col01 + 2.pow(8) * col23 + xor_total
-            //         let xor_magic_value = Expression::Constant(F::from_u128(16777216))
-            //             + Expression::Constant(F::from_u128(65536)) * col01.clone()
-            //             + Expression::Constant(F::from_u128(256)) * col23.clone()
-            //             + xor_total;
-            //         let gate = qxor_total.clone() * xor_magic_value;
-            //         gates.push((gate, xor_table));
-            //     }
-            // }
+                for j in 0..4 {
+                    let xor_total = meta.query_advice(aes_state[i + 4 * j], Rotation::cur());
+                    // we need to do the xor magic again
+                    // i.e., 2.pow(24) + 2.pow(16) * col01 + 2.pow(8) * col23 + xor_total
+                    let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+                        + Expression::Constant(F::from_u128(65536)) * col01.clone()
+                        + Expression::Constant(F::from_u128(256)) * col23.clone()
+                        + xor_total;
+                    let gate = qxor_total.clone() * xor_magic_value;
+                    gates.push((gate, xor_table));
+                }
+            }
 
             // xor(col, total) check
-            // let qxor_col_total = meta.query_selector(q_xor_col_total);
-            // for i in 0..16 {
-            //     let col = meta.query_advice(aes_state[i], Rotation(-3));
-            //     let total = meta.query_advice(aes_state[i], Rotation::prev());
+            let qxor_col_total = meta.query_selector(q_xor_col_total);
+            for i in 0..16 {
+                let col = meta.query_advice(aes_state[i], Rotation(-3));
+                let total = meta.query_advice(aes_state[i], Rotation::prev());
 
-            //     let col_xor_total = meta.query_advice(aes_state[i], Rotation::cur());
+                let col_xor_total = meta.query_advice(aes_state[i], Rotation::cur());
 
-            //     // we need to do the xor magic again
-            //     // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * total + col_xor_total
-            //     let xor_magic_value = Expression::Constant(F::from_u128(16777216))
-            //         + Expression::Constant(F::from_u128(65536)) * col
-            //         + Expression::Constant(F::from_u128(256)) * total
-            //         + col_xor_total;
-            //     let gate = qxor_col_total.clone() * xor_magic_value;
-            //     gates.push((gate, xor_table));
-            // }
+                // we need to do the xor magic again
+                // i.e., 2.pow(24) + 2.pow(16) * col + 2.pow(8) * total + col_xor_total
+                let xor_magic_value = Expression::Constant(F::from_u128(16777216))
+                    + Expression::Constant(F::from_u128(65536)) * col
+                    + Expression::Constant(F::from_u128(256)) * total
+                    + col_xor_total;
+                let gate = qxor_col_total.clone() * xor_magic_value;
+                gates.push((gate, xor_table));
+            }
 
             // xtime operation check
             let qxtime = meta.query_selector(q_xtime);
-            // for i in 0..16 {
-            //     let col_adj = meta.query_advice(aes_state[i], Rotation(-3));
-            //     let xtime_value = meta.query_advice(aes_state[i], Rotation::cur());
+            for i in 0..16 {
+                let col_adj = meta.query_advice(aes_state[i], Rotation(-3));
+                let xtime_value = meta.query_advice(aes_state[i], Rotation::cur());
 
-            //     // we need to compute the xtime magic value and check if it is present in the lookup table
-            //     // 2.pow(25) + 2.pow(8) * x + xtime
-            //     let xtime_magic_value = Expression::Constant(F::from_u128(33554432))
-            //         + Expression::Constant(F::from_u128(256)) * col_adj
-            //         + xtime_value;
-            //     let gate = qxtime.clone() * xtime_magic_value;
-            //     gates.push((gate, xtime_table));
-            // }
+                // we need to compute the xtime magic value and check if it is present in the lookup table
+                // 2.pow(25) + 2.pow(8) * x + xtime
+                let xtime_magic_value = Expression::Constant(F::from_u128(33554432))
+                    + Expression::Constant(F::from_u128(256)) * col_adj
+                    + xtime_value;
+                let gate = qxtime.clone() * xtime_magic_value;
+                gates.push((gate, xtime_table));
+            }
             gates
         });
 
