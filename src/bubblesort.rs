@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn test_bubblesort_valid() {
-        let k = 10;
+        let k = 9;
 
         // input array
         let input = vec![3, 5, 1, 2]
@@ -312,6 +312,32 @@ mod tests {
 
         let public_input = [&input[..], &output[..]].concat();
         let circuit = BubbleSortCicuit::<Fp, 4> {
+            input_array: input.clone(),
+            _marker: PhantomData::<Fp>,
+        };
+
+        let prover = MockProver::run(k, &circuit, vec![public_input]).unwrap();
+
+        prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_bubblesort_big_array_valid() {
+        let k = 10;
+
+        // input array
+        let input = vec![3, 5, 1, 2, 10, 15, 25, 3, 9, 12]
+            .into_iter()
+            .map(Fp::from)
+            .collect::<Vec<_>>();
+
+        let output = vec![1, 2, 3, 3, 5, 9, 10, 12, 15, 25]
+            .into_iter()
+            .map(Fp::from)
+            .collect::<Vec<_>>();
+
+        let public_input = [&input[..], &output[..]].concat();
+        let circuit = BubbleSortCicuit::<Fp, 10> {
             input_array: input.clone(),
             _marker: PhantomData::<Fp>,
         };
