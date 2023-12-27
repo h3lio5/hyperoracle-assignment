@@ -65,7 +65,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                         )
                         .expect("loading range check table failed");
                 }
-
+                dbg!("lookup table: range_check");
                 ////////// XOR Table /////////////
                 // uses a trick to check that the (a xor b) is valid.
                 // Trick: for all pairs of a byte value, i.e., (a,b) where both a and b lie in [0, 256)
@@ -86,6 +86,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 };
 
                 let xor_magic_values = f_xor();
+                dbg!("lookup table: xor", xor_magic_values.len());
                 for (offset, value) in xor_magic_values.into_iter().enumerate() {
                     table
                         .assign_cell(
@@ -102,7 +103,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 // Trick: for all pairs of a byte value, i.e., (x,x_time) where both a and b lie in [0, 256)
                 // compute f_xtime(a,b) = (2**25 + 2*8 * a + b), where b = xtime(a); load it into the lookup table.
                 // During proof generation, to check if b is the correct xtime of a, we just lookup if f_xtime(a,b) is present in the table.
-                let f_xtime = || {
+                let f_xtime_values = || {
                     let mut xtime_magic_values = vec![];
                     for a in 0..=255u8 {
                         let xtime_value = f_xtime(a);
@@ -115,7 +116,8 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                     xtime_magic_values
                 };
 
-                let xtime_magic_values = f_xtime();
+                let xtime_magic_values = f_xtime_values();
+                dbg!("lookup table: xtime", xtime_magic_values.len());
                 for (offset, value) in xtime_magic_values.into_iter().enumerate() {
                     table
                         .assign_cell(
@@ -144,6 +146,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 };
 
                 let sbox_magic_values = f_sbox();
+                dbg!("lookup table: sbox", sbox_magic_values.len());
                 for (offset, value) in sbox_magic_values.into_iter().enumerate() {
                     table
                         .assign_cell(
@@ -675,7 +678,7 @@ impl<F: PrimeField> Circuit<F> for AES128Circuit<F> {
             .assign_xor(&mut layouter, &input, &key)
             .expect("failure @ assign_add_round_key");
         // perform 9 rounds of AES128 block encryption
-        for i in 0..9 {
+        for _i in 0..9 {
             // substitute bytes
             (prev_arr, prev_arr_acell) = config
                 .assign_sub_bytes(&mut layouter, &prev_arr)
@@ -744,7 +747,7 @@ mod tests {
 
     #[test]
     fn test_aes128_valid() {
-        let k = 12;
+        let k = 18;
 
         // input array
         let input = [
