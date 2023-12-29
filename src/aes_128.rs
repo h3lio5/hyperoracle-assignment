@@ -55,7 +55,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
             |mut table| {
                 ////////// Range Check /////////////
                 // checks if a value is within the range [0, 255)
-                for (offset, value) in (0..256).enumerate() {
+                for (offset, value) in (0..(256 * 256)).enumerate() {
                     table
                         .assign_cell(
                             || "loading range check... ",
@@ -65,6 +65,7 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                         )
                         .expect("loading range check table failed");
                 }
+
                 // dbg!("lookup table: range_check");
                 ////////// XOR Table /////////////
                 // uses a trick to check that the (a xor b) is valid.
@@ -86,7 +87,15 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                 };
 
                 let xor_magic_values = f_xor();
-                // dbg!("lookup table: xor", xor_magic_values.len());
+                dbg!("lookup table: xor", xor_magic_values.len());
+                // dbg!(
+                //     "xor lookup table: ",
+                //     xor_magic_values
+                //         .clone()
+                //         .iter_mut()
+                //         .take(10)
+                //         .collect::<Vec<_>>()
+                // );
                 for (offset, value) in xor_magic_values.into_iter().enumerate() {
                     table
                         .assign_cell(
@@ -128,6 +137,17 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                         )
                         .expect("loading xtime table failed");
                 }
+                // DEBUG
+                for i in (256..(256 * 256)) {
+                    table
+                        .assign_cell(
+                            || "loading xtime table values...",
+                            self.xtime_table,
+                            i,
+                            || Value::known(F::from_u128(0 as u128)),
+                        )
+                        .expect("loading xtime table failed");
+                }
 
                 //////////////////// SBOX Table /////////////////////
                 // checks if the byte substition in the AES round happened using the correct bytes substition table
@@ -154,6 +174,17 @@ impl<F: PrimeField> AESByteMagicTablesConfig<F> {
                             self.sbox_table,
                             offset,
                             || Value::known(F::from_u128(value as u128)),
+                        )
+                        .expect("loading sbox table failed");
+                }
+
+                for i in 256..(256 * 256) {
+                    table
+                        .assign_cell(
+                            || "loading sbox table values...",
+                            self.sbox_table,
+                            i,
+                            || Value::known(F::from_u128(0 as u128)),
                         )
                         .expect("loading sbox table failed");
                 }
@@ -660,12 +691,14 @@ impl<F: PrimeField> Circuit<F> for AES128Circuit<F> {
         let key = self.key.to_vec();
 
         // load the lookup table
-        let result = config.byte_magic_table.load(&mut layouter);
-        // .expect("byte_magic_table loading error");
-        match result {
-            Ok(_) => println!("lookup table loaded!"),
-            Err(error) => println!("the loading error is {:?}", error),
-        }
+        let result = config
+            .byte_magic_table
+            .load(&mut layouter)
+            .expect("byte_magic_table loading error");
+        // match result {
+        //     Ok(_) => println!("lookup table loaded!"),
+        //     Err(error) => println!("the loading error is {:?}", error),
+        // }
 
         let mut prev_arr: Vec<u8>;
         let mut prev_arr_acell: Vec<ACell<F>>;
